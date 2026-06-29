@@ -23,23 +23,29 @@ def _normalize_text(value: str | None, fallback: str) -> str:
 
 
 def _format_commit_text(owner: str, repo: str, commit: CommitData) -> str:
-    files_changed = ", ".join(commit.files_changed) if commit.files_changed else "Not provided."
-    return (
-        f"Repository {owner}/{repo} recorded commit {commit.sha}. "
-        f"The author was {_normalize_text(commit.author, 'unknown')} and the commit date was "
-        f"{_normalize_text(commit.date, 'unknown')}. "
-        f"The commit message was: {_normalize_text(commit.message, 'No commit message provided.')}\n\n"
-        f"Files changed: {files_changed}"
-    )
+    author = _normalize_text(commit.author, "an unknown author")
+    date = _normalize_text(commit.date, "an unknown date")
+    message = _normalize_text(commit.message, "make an undocumented change")
+    text = f"On {date}, {author} committed {commit.sha} in {owner}/{repo} to {message}."
+    if commit.files_changed:
+        text += f" The change touched {', '.join(commit.files_changed)}."
+    else:
+        text += " The changed files were not included in the GitHub response."
+    return text
 
 
 def _format_pr_text(owner: str, repo: str, pr: PRData) -> str:
+    title = _normalize_text(pr.title, "Untitled pull request")
+    body = _normalize_text(pr.body, "No pull request description was provided.")
+    state = _normalize_text(pr.state, "unknown")
+    outcome = (
+        f"It was merged on {pr.merged_at}."
+        if pr.merged_at
+        else "It has not been merged."
+    )
     return (
-        f"Repository {owner}/{repo} has pull request #{pr.number} titled "
-        f"\"{_normalize_text(pr.title, 'Untitled pull request')}\". "
-        f"The pull request state is {_normalize_text(pr.state, 'unknown')} and it was merged at "
-        f"{_normalize_text(pr.merged_at, 'not merged')}. "
-        f"Pull request description: {_normalize_text(pr.body, 'No pull request description provided.')}"
+        f"In {owner}/{repo}, PR #{pr.number}, \"{title}\", proposed the following change: {body} "
+        f"The pull request is currently {state}. {outcome}"
     )
 
 
@@ -50,20 +56,18 @@ def _build_comment_source_id(pr: PRData, comment: PRComment, index: int) -> str:
 
 
 def _format_pr_comment_text(owner: str, repo: str, pr: PRData, comment: PRComment) -> str:
+    author = _normalize_text(comment.author, "an unknown participant")
+    created_at = _normalize_text(comment.created_at, "an unknown time")
+    body = _normalize_text(comment.body, "No comment body was provided.")
+    title = _normalize_text(pr.title, "Untitled pull request")
     return (
-        f"Repository {owner}/{repo} has a comment on pull request #{pr.number}, "
-        f"\"{_normalize_text(pr.title, 'Untitled pull request')}\". "
-        f"The comment author was {_normalize_text(comment.author, 'unknown')} and it was created at "
-        f"{_normalize_text(comment.created_at, 'unknown')}. "
-        f"Comment text: {_normalize_text(comment.body, 'No comment body provided.')}"
+        f"In the discussion for {owner}/{repo} PR #{pr.number}, \"{title}\", {author} noted on "
+        f"{created_at}: {body}"
     )
 
 
 def _format_manual_decision_text(owner: str, repo: str, content: str) -> str:
-    return (
-        f"Manual decision log entry for repository {owner}/{repo}. "
-        f"Decision details: {_normalize_text(content, 'No decision details provided.')}"
-    )
+    return f"A manual decision was recorded for {owner}/{repo}: {_normalize_text(content, 'No decision details were provided.')}"
 
 
 def _skip_entry(source_type: str, source_id: str, reason: str) -> dict[str, str]:
