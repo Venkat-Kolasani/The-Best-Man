@@ -5,6 +5,7 @@ __pycache__/
 dist/
 .venv/
 venv/
+backend/data/
 
 # Node
 node_modules/
@@ -20,3 +21,4 @@ data/cognee/
 # OS
 .DS_Store
 Thumbs.db
+backend/data/
