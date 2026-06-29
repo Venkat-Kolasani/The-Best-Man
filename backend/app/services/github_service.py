@@ -105,6 +105,7 @@ def _parse_commit(item: dict[str, Any]) -> CommitData:
 
 def _parse_pr_comment(item: dict[str, Any]) -> PRComment:
     return PRComment(
+        comment_id=str(item["id"]) if item.get("id") is not None else None,
         author=(item.get("user") or {}).get("login"),
         body=item.get("body") or "",
         created_at=item.get("created_at"),

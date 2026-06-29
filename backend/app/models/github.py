@@ -12,6 +12,7 @@ class CommitData(BaseModel):
 
 
 class PRComment(BaseModel):
+    comment_id: str | None = None
     author: str | None = None
     body: str
     created_at: str | None = None
