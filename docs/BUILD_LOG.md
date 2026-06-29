@@ -32,6 +32,19 @@ We checked the actual installed `__init__.py` and function signatures. Key findi
 - `dataset_name` param in `remember`/`add` is the primary scoping mechanism; `session_id` is ephemeral only
 - Using V2 API (`remember`/`recall`/`improve`/`forget`) as primary interface since it's the recommended 1.0+ path
 
+## 2026-06-29 — Switched to Gemini (free tier)
+
+### Why
+User doesn't have OpenAI credits. Gemini 1.5 Flash via Google AI Studio has a generous free tier (60 req/min, no credit card needed).
+
+### Changes
+- `config.py`: default provider changed from `openai` → `litellm`, model from `gpt-4o` → `gemini/gemini-1.5-flash`
+- `.env.example`: updated with Gemini setup instructions + link to get free API key
+- `README.md`: env var table updated to show Gemini as the recommended free option
+
+### How Cognee routes to Gemini
+Cognee uses litellm internally. With `provider="litellm"` and `model="gemini/gemini-1.5-flash"`, litellm handles the API routing. The `LLM_API_KEY` is a Google AI Studio API key.
+
 ## 2026-06-29 — Smoke Test Script
 
 ### What we built

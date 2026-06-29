@@ -26,10 +26,10 @@ uvicorn app.main:app --reload
 
 | Variable | Where to get it |
 |---|---|
-| `LLM_API_KEY` | [OpenAI API keys](https://platform.openai.com/api-keys) (or your preferred LLM provider's console) |
+| `LLM_API_KEY` | **Free**: [Google AI Studio](https://aistudio.google.com/apikey) (Gemini 1.5 Flash — 60 req/min, no CC needed). **Paid**: [OpenAI](https://platform.openai.com/api-keys) or [Anthropic](https://console.anthropic.com/) |
 | `GITHUB_TOKEN` | [GitHub Tokens](https://github.com/settings/tokens) — needs `repo` or `public_repo` scope |
-| `COGNEE_LLM_PROVIDER` | `"openai"` (default), `"anthropic"`, or any [litellm provider](https://docs.litellm.ai/docs/providers) |
-| `COGNEE_LLM_MODEL` | Model name your provider supports, e.g. `"gpt-4o"`, `"claude-sonnet-4-20250514"` |
+| `COGNEE_LLM_PROVIDER` | `"litellm"` (Gemini, default), `"openai"`, or `"anthropic"` |
+| `COGNEE_LLM_MODEL` | `"gemini/gemini-1.5-flash"` (default), `"gpt-4o"`, or `"claude-sonnet-4-20250514"` |
 
 Cognee 1.2+ enables multi-user access control by default. For local dev, add `ENABLE_BACKEND_ACCESS_CONTROL=false` to `.env` to skip authentication.
 
