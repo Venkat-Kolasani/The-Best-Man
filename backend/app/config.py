@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import cognee
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -31,6 +30,8 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent
 def initialize_cognee() -> None:
     """Apply this app's configured provider, model, and key to Cognee."""
     global _cognee_initialized
+
+    import cognee
 
     if _cognee_initialized:
         return
