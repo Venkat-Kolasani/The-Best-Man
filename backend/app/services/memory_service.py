@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import cognee
+from app.config import initialize_cognee
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,8 @@ async def remember_decision(
             f"source_type must be one of {sorted(_VALID_SOURCE_TYPES)}, got '{source_type}'.",
         )
 
+    initialize_cognee()
+
     formatted = f"[source: {source_type} | id: {source_id}]\n{content}"
 
     _check_params(
@@ -208,6 +211,8 @@ async def recall_answer(query: str, dataset_name: str) -> RecallResult:
         print(result.source)
         print(len(result.references))
     """
+    initialize_cognee()
+
     _check_params(
         cognee.recall,
         "recall",
@@ -225,6 +230,8 @@ async def recall_answer(query: str, dataset_name: str) -> RecallResult:
     except MemoryServiceError:
         raise
     except Exception as exc:
+        if "DatasetNotFoundError" in str(exc):
+            return RecallResult(answer="", source="empty")
         raise MemoryServiceError("recall", str(exc)) from exc
 
     if not results:
@@ -311,6 +318,8 @@ async def improve_memory(feedback: str, dataset_name: str) -> None:
             dataset_name="repo:acme/widgets",
         )
     """
+    initialize_cognee()
+
     formatted = f"[source: feedback | id: manual]\n{feedback}"
 
     _check_params(
@@ -367,6 +376,8 @@ async def forget_dataset(dataset_name: str) -> None:
 
         await forget_dataset("repo:acme/widgets")
     """
+    initialize_cognee()
+
     _check_params(
         cognee.forget,
         "forget",

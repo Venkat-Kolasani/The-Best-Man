@@ -16,14 +16,63 @@ from __future__ import annotations
 import asyncio
 import sys
 import time
+from pathlib import Path
+import os
 
 # ---------------------------------------------------------------------------
 # Add the parent directory so we can import app.services.memory_service
 # when run as `python scripts/smoke_test.py` from the backend/ directory.
 # ---------------------------------------------------------------------------
-from pathlib import Path
+BACKEND_DIR = Path(__file__).resolve().parent.parent
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+def ensure_compatible_runtime() -> None:
+    """Re-exec into a Python runtime that has Cognee and its compiled deps."""
+    try:
+        import cognee  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    if os.environ.get("TBM_SMOKE_REEXEC") == "1":
+        return
+
+    for candidate in ("/opt/anaconda3/bin/python", "/opt/anaconda3/bin/python3"):
+        candidate_path = Path(candidate)
+        if not candidate_path.exists() or Path(sys.executable).resolve() == candidate_path.resolve():
+            continue
+
+        os.environ["TBM_SMOKE_REEXEC"] = "1"
+        os.execv(candidate, [candidate, str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
+def load_backend_env() -> None:
+    """Load backend/.env without depending on python-dotenv at runtime."""
+    env_path = BACKEND_DIR / ".env"
+
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        if not env_path.exists():
+            return
+
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            os.environ[key.strip()] = value
+        return
+
+    load_dotenv(env_path, override=True)
+
+
+ensure_compatible_runtime()
+load_backend_env()
+sys.path.insert(0, str(BACKEND_DIR))
 
 from app.services.memory_service import (
     MemoryServiceError,
