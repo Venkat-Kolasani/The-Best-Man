@@ -1,0 +1,135 @@
+# .cursorrules — "The Best Man" (Cognee Hackathon: Where's My Context?)
+
+## What this project is
+"The Best Man" is a decision-memory agent for codebases. It ingests git commits,
+PR descriptions/comments, and manually logged decisions into Cognee's knowledge
+graph, then answers natural-language questions like "why did we drop approach X?"
+by tracing the graph instead of doing flat vector search. It demonstrates the full
+Cognee memory lifecycle: remember -> recall -> improve -> forget.
+
+Stack: FastAPI backend, Cognee for memory, React (Vite) frontend, GitHub REST API
+for ingestion, SQLite/local files for any non-Cognee bookkeeping needed.
+
+## Non-negotiable ground rules
+
+1. Never invent a Cognee API. The real surface (confirmed against the live
+   GitHub repo and docs in 2026) is:
+   - High-level: `cognee.remember(data, session_id=None)`,
+     `cognee.recall(query, session_id=None)`, `cognee.improve(...)`,
+     `cognee.forget(dataset=None, session_id=None)`
+   - Low-level/legacy (still supported, use these if high-level calls misbehave
+     or you need fine control): `cognee.add(data, dataset_name=...)`,
+     `cognee.cognify(datasets=[...])`, `cognee.search(query_text=..., query_type=...)`,
+     `cognee.memify(...)`, `cognee.prune.prune_data()`, `cognee.prune.prune_system(metadata=True)`
+   - If you are not 100% sure a parameter or function exists, say so out loud in
+     the response and check `pip show cognee`'s installed version / the
+     installed package source (`site-packages/cognee/__init__.py`) before
+     writing code that depends on it. Do not silently guess and move on.
+
+2. Never hardcode secrets. `LLM_API_KEY`, `GITHUB_TOKEN`, and any DB credentials
+   live in `.env`, loaded via `python-dotenv` or `pydantic-settings`. `.env` is
+   gitignored. Always provide an updated `.env.example` when you add a new
+   required variable.
+
+3. All Cognee calls are async. Never wrap them in sync code without `asyncio.run`
+   or a proper async route handler. FastAPI route handlers that touch Cognee must
+   be declared `async def`.
+
+4. Dataset and session naming is intentional, not arbitrary:
+   - One Cognee dataset per ingested repo: `dataset_name=f"repo:{owner}/{repo}"`
+   - Manual decision-log entries go into the same dataset, not a separate one,
+     so graph traversal can connect them to commits/PRs.
+   - Use `session_id` only for ephemeral per-conversation context (e.g. a single
+     Q&A turn doing follow-up clarification), never for data meant to persist.
+
+5. Every ingestion function must be idempotent. Re-running ingestion on a repo
+   that was already ingested should not duplicate nodes. Check Cognee's
+   deduplication behavior (content hashing) before adding custom dedup logic;
+   only add your own dedup key (e.g. commit SHA) if Cognee's default hashing
+   doesn't cover the case (e.g. the same commit message text appearing in two
+   different repos).
+
+6. Known pitfall — do not waste time rediscovering it: on some local setups,
+   `cognee.add()` / `cognee.cognify()` can hang indefinitely against local
+   OpenAI-compatible LLM endpoints (e.g. Ollama) due to a connectivity test
+   that assumes `sk-`-prefixed keys. If running against a local LLM, set a
+   non-`sk-` placeholder key only if explicitly configured for a custom
+   provider, and add an explicit timeout / health-check step in setup code
+   rather than letting it hang silently. Default to a hosted LLM provider
+   (e.g. OpenAI) for the hackathon build unless told otherwise — it's the
+   path of least friction for a multi-day solo build.
+
+7. Graph traversal visualization is a first-class feature, not a nice-to-have.
+   Any `recall()` result shown in the UI should be accompanied by the
+   underlying nodes/edges used to answer it, where Cognee's response exposes
+   them. If Cognee's response doesn't include traversal metadata, fetch it via
+   `cognee.search()` with the appropriate graph search type, or via the
+   visualization endpoint, rather than fabricating a plausible-looking path.
+
+8. Never fabricate demo data to look more impressive. The repo used for ingestion
+   and the demo must be real (a real GitHub repo Venkat owns or has access to,
+   e.g. MemoryWeave or FutureStack). Synthetic/manual decision-log entries used
+   in the demo must be clearly real entries the user wrote, not auto-generated
+   filler designed to make the graph traversal look good.
+
+## Code style
+
+- Python: type-annotated where practical, `ruff format` + `ruff check` clean,
+  100-char line length (matches Cognee's own repo convention). Use
+  `cognee.shared.logging_utils`-style structured logging conventions in spirit
+  (i.e. structured log lines, not bare `print()`) for anything beyond throwaway
+  scripts.
+- Prefer explicit, typed Pydantic models for all FastAPI request/response bodies.
+  No bare `dict` payloads for any endpoint that's part of the public API surface.
+- React: functional components + hooks only. No class components. Keep state
+  management simple (useState/useReducer/context) — this is a hackathon project,
+  not a Redux showcase.
+- No dashes or em-dashes in generated report/documentation prose unless
+  grammatically unavoidable; use plain sentence structure instead (matches
+  Venkat's existing documentation preference).
+- Comments should explain *why*, not *what* — especially around any Cognee
+  call where the choice of dataset/session/search-type matters.
+
+## Testing expectations
+
+- Every ingestion function (git commits, PR comments, manual decision log) gets
+  a unit test with a mocked GitHub API response and a mocked Cognee client.
+  Never let tests make real network calls to GitHub or burn real LLM API credits.
+- Integration tests that do exercise real Cognee calls are isolated behind a
+  pytest marker (e.g. `@pytest.mark.live_cognee`) and skipped by default in CI;
+  document how to run them locally with real credentials.
+- Any bug fix must come with a regression test that fails before the fix and
+  passes after.
+- Run `pytest` and `ruff check` before considering any task complete. State the
+  actual command output, don't assume it passed.
+
+## Documentation expectations
+
+- `README.md` stays current with: setup steps, environment variables required,
+  how to run the ingestion pipeline, how to run the API, how to run the frontend,
+  and how to run tests. If a prompt changes any of these, update the README in
+  the same response, don't defer it.
+- Maintain `docs/ARCHITECTURE.md` describing the ingestion -> graph -> recall
+  flow and how `remember/recall/improve/forget` map to the four UI actions in
+  the demo.
+- Maintain `docs/DEMO_SCRIPT.md` with the exact sequence of actions for the
+  hackathon demo video, kept in sync with whatever the UI actually does (don't
+  let the script describe features that no longer exist).
+- Every new public function gets a docstring with a one-line summary, Args,
+  Returns, and a usage example, mirroring the style Cognee itself uses for its
+  own public API.
+
+## Workflow expectations for Cursor/Claude when working in this repo
+
+- Before writing code that calls a Cognee function you haven't used yet in this
+  project, check the installed Cognee version's actual signature rather than
+  assuming from memory or from the marketing site.
+- When a prompt asks for a new feature, implement it, write/update its tests,
+  and update relevant docs in the same pass — don't split "build it" and
+  "document it" into separate untracked steps.
+- When something is ambiguous (e.g. which repo to ingest, which search type to
+  use for a given question), ask rather than silently picking a default,
+  consistent with how Venkat prefers to work.
+- Don't introduce new dependencies (databases, queues, frontend libraries)
+  without flagging it first — this is a solo, multi-day build, and scope creep
+  is the main risk to finishing.
