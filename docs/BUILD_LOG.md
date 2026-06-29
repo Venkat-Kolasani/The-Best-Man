@@ -43,7 +43,10 @@ User doesn't have OpenAI credits. Gemini 1.5 Flash via Google AI Studio has a ge
 - `README.md`: env var table updated to show Gemini as the recommended free option
 
 ### How Cognee routes to Gemini
-Cognee uses litellm internally. With `provider="litellm"` and `model="gemini/gemini-1.5-flash"`, litellm handles the API routing. The `LLM_API_KEY` is a Google AI Studio API key.
+Cognee uses litellm internally. With `provider="litellm"` and `model="gemini/gemini-3.1-flash-lite"`, litellm handles the API routing. The `LLM_API_KEY` is a Google AI Studio API key.
+
+### Later: switched to Gemini 3.1 Flash Lite
+User asked for `gemini-3.1-flash-lite` specifically. It's Google's most cost-efficient model, GA since May 2026, $0.25/1M input tokens. Updated config.py, .env.example, and README.
 
 ## 2026-06-29 — Smoke Test Script
 

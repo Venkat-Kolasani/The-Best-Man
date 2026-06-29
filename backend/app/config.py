@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     github_token: str = ""
     cognee_db_path: str = "data/cognee"
     cognee_llm_provider: str = "litellm"
-    cognee_llm_model: str = "gemini/gemini-1.5-flash"
+    cognee_llm_model: str = "gemini/gemini-3.1-flash-lite"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
