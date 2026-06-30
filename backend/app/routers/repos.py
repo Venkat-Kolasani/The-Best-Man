@@ -15,6 +15,7 @@ from app.models.api import (
     ManualDecisionResponse,
 )
 from app.services import ingestion_service
+from app.services import memory_service
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ router = APIRouter(prefix="/repos/{owner}/{repo}", tags=["repos"])
 # its own isolated copy of job state.
 _INGEST_JOBS: dict[str, dict[str, object | None]] = {}
 _INGEST_TIMEOUT_SECONDS = int(os.getenv("INGEST_JOB_TIMEOUT_SECONDS", "900"))
+_MANUAL_DECISION_TIMEOUT_SECONDS = int(os.getenv("MANUAL_DECISION_TIMEOUT_SECONDS", "120"))
 
 
 async def _run_ingestion_job(job_id: str, owner: str, repo: str) -> None:
@@ -128,11 +130,45 @@ async def get_ingestion_status(owner: str, repo: str, job_id: str) -> IngestJobS
 @router.post(
     "/decisions",
     response_model=ManualDecisionResponse,
+    responses={
+        409: {"model": ErrorResponse},
+        503: {"model": ErrorResponse},
+        504: {"model": ErrorResponse},
+    },
 )
 async def add_manual_decision(
     owner: str,
     repo: str,
     request: ManualDecisionRequest,
 ) -> ManualDecisionResponse:
-    await ingestion_service.add_manual_decision(owner, repo, request.content)
+    try:
+        await asyncio.wait_for(
+            ingestion_service.add_manual_decision(owner, repo, request.content),
+            timeout=_MANUAL_DECISION_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=(
+                "Manual decision logging timed out after "
+                f"{_MANUAL_DECISION_TIMEOUT_SECONDS} seconds while waiting on the memory engine."
+            ),
+        ) from exc
+    except memory_service.MemoryBusyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Memory is busy with another local Cognee operation. "
+                "Please retry manual decision logging after the current ingest or write finishes."
+            ),
+        ) from exc
+    except memory_service.MemoryServiceError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Unable to log the manual decision right now because the memory engine "
+                f"reported an error: {exc.detail}"
+            ),
+        ) from exc
+
     return ManualDecisionResponse(status="ok", source_id=None)

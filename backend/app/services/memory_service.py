@@ -10,8 +10,10 @@ All signatures below are confirmed against cognee 1.2.2 installed in
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,6 +23,13 @@ from app.config import initialize_cognee
 logger = logging.getLogger(__name__)
 
 _VALID_SOURCE_TYPES = frozenset({"commit", "pr_comment", "manual_log"})
+_MEMORY_OPERATION_LOCK = asyncio.Lock()
+_MEMORY_BUSY_TIMEOUT_SECONDS = float(os.getenv("MEMORY_BUSY_TIMEOUT_SECONDS", "1.0"))
+_LOCK_ERROR_MARKERS = (
+    "Could not set lock on file",
+    "Lock is held by PID",
+    ".lbug",
+)
 
 
 class MemoryServiceError(Exception):
@@ -35,6 +44,10 @@ class MemoryServiceError(Exception):
         self.operation = operation
         self.detail = detail
         super().__init__(f"[{operation}] {detail}")
+
+
+class MemoryBusyError(MemoryServiceError):
+    """Raised when the local Cognee/Ladybug store is already in use."""
 
 
 @dataclass
@@ -96,6 +109,31 @@ def _check_params(func: Any, operation: str, **kwargs: Any) -> None:
             )
 
 
+def _normalize_exception(operation: str, exc: Exception) -> MemoryServiceError:
+    detail = str(exc)
+    if any(marker in detail for marker in _LOCK_ERROR_MARKERS):
+        return MemoryBusyError(
+            operation,
+            "Memory is busy with another operation against the local Cognee store. "
+            "Please retry once the current ingest or write finishes.",
+        )
+    return MemoryServiceError(operation, detail)
+
+
+async def _acquire_memory_lock(operation: str) -> None:
+    try:
+        await asyncio.wait_for(
+            _MEMORY_OPERATION_LOCK.acquire(),
+            timeout=_MEMORY_BUSY_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise MemoryBusyError(
+            operation,
+            "Memory is busy with another operation against the local Cognee store. "
+            "Please retry once the current ingest or write finishes.",
+        ) from exc
+
+
 async def remember_decision(
     content: str,
     dataset_name: str,
@@ -150,17 +188,18 @@ async def remember_decision(
         )
 
     initialize_cognee()
-
-    formatted = f"[source: {source_type} | id: {source_id}]\n{content}"
-
-    _check_params(
-        cognee.remember,
-        "remember",
-        data=formatted,
-        dataset_name=dataset_name,
-    )
+    await _acquire_memory_lock("remember")
 
     try:
+        formatted = f"[source: {source_type} | id: {source_id}]\n{content}"
+
+        _check_params(
+            cognee.remember,
+            "remember",
+            data=formatted,
+            dataset_name=dataset_name,
+        )
+
         result = await cognee.remember(
             data=formatted,
             dataset_name=dataset_name,
@@ -173,7 +212,9 @@ async def remember_decision(
     except MemoryServiceError:
         raise
     except Exception as exc:
-        raise MemoryServiceError("remember", str(exc)) from exc
+        raise _normalize_exception("remember", exc) from exc
+    finally:
+        _MEMORY_OPERATION_LOCK.release()
 
 
 async def recall_answer(query: str, dataset_name: str) -> RecallResult:
@@ -212,16 +253,17 @@ async def recall_answer(query: str, dataset_name: str) -> RecallResult:
         print(len(result.references))
     """
     initialize_cognee()
-
-    _check_params(
-        cognee.recall,
-        "recall",
-        query_text=query,
-        datasets=[dataset_name],
-        include_references=True,
-    )
+    await _acquire_memory_lock("recall")
 
     try:
+        _check_params(
+            cognee.recall,
+            "recall",
+            query_text=query,
+            datasets=[dataset_name],
+            include_references=True,
+        )
+
         results = await cognee.recall(
             query_text=query,
             datasets=[dataset_name],
@@ -232,7 +274,9 @@ async def recall_answer(query: str, dataset_name: str) -> RecallResult:
     except Exception as exc:
         if "DatasetNotFoundError" in str(exc):
             return RecallResult(answer="", source="empty")
-        raise MemoryServiceError("recall", str(exc)) from exc
+        raise _normalize_exception("recall", exc) from exc
+    finally:
+        _MEMORY_OPERATION_LOCK.release()
 
     if not results:
         return RecallResult(answer="", source="empty")
@@ -319,40 +363,38 @@ async def improve_memory(feedback: str, dataset_name: str) -> None:
         )
     """
     initialize_cognee()
-
-    formatted = f"[source: feedback | id: manual]\n{feedback}"
-
-    _check_params(
-        cognee.remember,
-        "improve_memory.remember",
-        data=formatted,
-        dataset_name=dataset_name,
-    )
+    await _acquire_memory_lock("improve_memory")
 
     try:
+        formatted = f"[source: feedback | id: manual]\n{feedback}"
+
+        _check_params(
+            cognee.remember,
+            "improve_memory.remember",
+            data=formatted,
+            dataset_name=dataset_name,
+        )
+
         result = await cognee.remember(
             data=formatted,
             dataset_name=dataset_name,
         )
         if inspect.isawaitable(result):
             await result
-    except MemoryServiceError:
-        raise
-    except Exception as exc:
-        raise MemoryServiceError("improve_memory.remember", str(exc)) from exc
 
-    _check_params(
-        cognee.improve,
-        "improve_memory.improve",
-        dataset=dataset_name,
-    )
+        _check_params(
+            cognee.improve,
+            "improve_memory.improve",
+            dataset=dataset_name,
+        )
 
-    try:
         await cognee.improve(dataset=dataset_name)
     except MemoryServiceError:
         raise
     except Exception as exc:
-        raise MemoryServiceError("improve_memory.improve", str(exc)) from exc
+        raise _normalize_exception("improve_memory", exc) from exc
+    finally:
+        _MEMORY_OPERATION_LOCK.release()
 
 
 async def forget_dataset(dataset_name: str) -> None:
@@ -377,16 +419,19 @@ async def forget_dataset(dataset_name: str) -> None:
         await forget_dataset("repo:acme/widgets")
     """
     initialize_cognee()
-
-    _check_params(
-        cognee.forget,
-        "forget",
-        dataset=dataset_name,
-    )
+    await _acquire_memory_lock("forget")
 
     try:
+        _check_params(
+            cognee.forget,
+            "forget",
+            dataset=dataset_name,
+        )
+
         await cognee.forget(dataset=dataset_name)
     except MemoryServiceError:
         raise
     except Exception as exc:
-        raise MemoryServiceError("forget", str(exc)) from exc
+        raise _normalize_exception("forget", exc) from exc
+    finally:
+        _MEMORY_OPERATION_LOCK.release()
