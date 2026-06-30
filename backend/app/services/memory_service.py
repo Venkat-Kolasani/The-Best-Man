@@ -14,6 +14,7 @@ import asyncio
 import inspect
 import logging
 import os
+from hashlib import sha1
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -71,7 +72,20 @@ class RecallResult:
     answer: str
     source: str
     references: list[dict] = field(default_factory=list)
+    graph_nodes: list[dict[str, Any]] = field(default_factory=list)
+    graph_edges: list[dict[str, Any]] = field(default_factory=list)
+    highlighted_node_ids: list[str] = field(default_factory=list)
+    highlighted_edge_ids: list[str] = field(default_factory=list)
     raw: list[Any] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RememberEntry:
+    """One source-tracked text entry for batch ingestion."""
+
+    source_type: str
+    source_id: str
+    content: str
 
 
 def _check_params(func: Any, operation: str, **kwargs: Any) -> None:
@@ -217,17 +231,78 @@ async def remember_decision(
         _MEMORY_OPERATION_LOCK.release()
 
 
+async def remember_decision_batch(
+    entries: list[RememberEntry],
+    dataset_name: str,
+) -> None:
+    """Store multiple decision-log entries in one Cognee remember call.
+
+    Batching reduces the number of Cognee add/cognify/improve pipeline runs,
+    which in turn reduces repeated embedding, indexing, and graph-extraction
+    work during large repository ingestions.
+
+    The trade-off is that Cognee content hashing now dedupes at the batch-text
+    level rather than at a single-source-entry level. If stricter per-source
+    deduplication is needed later, we can add explicit source tracking outside
+    of the batch payload.
+    """
+    if not entries:
+        return
+
+    for entry in entries:
+        if entry.source_type not in _VALID_SOURCE_TYPES:
+            raise MemoryServiceError(
+                "remember_decision_batch",
+                f"source_type must be one of {sorted(_VALID_SOURCE_TYPES)}, got '{entry.source_type}'.",
+            )
+
+    initialize_cognee()
+    await _acquire_memory_lock("remember_batch")
+
+    try:
+        formatted_entries: list[str] = [
+            "Repository ingestion batch.",
+            "",
+        ]
+        for index, entry in enumerate(entries, start=1):
+            formatted_entries.extend(
+                [
+                    f"Entry {index}:",
+                    f"Source: {entry.source_type} {entry.source_id}",
+                    entry.content,
+                    "",
+                ]
+            )
+        batch_text = "\n".join(formatted_entries).rstrip()
+
+        _check_params(
+            cognee.remember,
+            "remember_batch",
+            data=batch_text,
+            dataset_name=dataset_name,
+        )
+
+        result = await cognee.remember(
+            data=batch_text,
+            dataset_name=dataset_name,
+        )
+        if inspect.isawaitable(result):
+            await result
+    except MemoryServiceError:
+        raise
+    except Exception as exc:
+        raise _normalize_exception("remember_batch", exc) from exc
+    finally:
+        _MEMORY_OPERATION_LOCK.release()
+
+
 async def recall_answer(query: str, dataset_name: str) -> RecallResult:
     """Query the knowledge graph for an answer.
 
-    Wraps ``cognee.recall(query_text, datasets=[...], include_references=True)``
-    (v1.2.2 confirmed).
-
-    ``include_references=True`` is passed so that graph traversal metadata
-    is included in the response for UI visualization (per .cursorrules
-    ground rule #7). ``auto_route`` is left at its default (True) so
-    Cognee's lightweight classifier picks the best search strategy
-    (GRAPH_COMPLETION, GRAPH_COMMUNITIES, etc.) for the query.
+    Uses ``cognee.search(..., query_type=SearchType.GRAPH_COMPLETION)`` so we
+    get the graph-oriented retriever path in the installed Cognee 1.2.2 API.
+    If Cognee session/cache metadata exposes ``used_graph_element_ids``, those
+    node and edge ids are returned as highlighted graph evidence for the UI.
 
     Args:
         query: Natural-language question.
@@ -235,8 +310,10 @@ async def recall_answer(query: str, dataset_name: str) -> RecallResult:
 
     Returns:
         RecallResult containing the answer text, source label, any
-        reference metadata for visualization, and the raw Cognee
-        response objects.
+        any reference metadata preserved for compatibility, the dataset graph
+        evidence snapshot when available, highlighted graph-element ids from
+        Cognee session metadata when available, and the raw Cognee response
+        objects.
 
     Raises:
         MemoryServiceError: If Cognee rejects the call or a parameter
@@ -255,19 +332,42 @@ async def recall_answer(query: str, dataset_name: str) -> RecallResult:
     initialize_cognee()
     await _acquire_memory_lock("recall")
 
+    highlighted_node_ids: list[str] = []
+    highlighted_edge_ids: list[str] = []
+    graph_nodes: list[dict[str, Any]] = []
+    graph_edges: list[dict[str, Any]] = []
+
     try:
+        from cognee.modules.search.types import SearchType
+
         _check_params(
-            cognee.recall,
-            "recall",
+            cognee.search,
+            "recall.search",
             query_text=query,
+            query_type=SearchType.GRAPH_COMPLETION,
             datasets=[dataset_name],
+            session_id=_build_recall_session_id(dataset_name),
             include_references=True,
+            verbose=True,
         )
 
-        results = await cognee.recall(
+        results = await cognee.search(
             query_text=query,
+            query_type=SearchType.GRAPH_COMPLETION,
             datasets=[dataset_name],
+            session_id=_build_recall_session_id(dataset_name),
             include_references=True,
+            verbose=True,
+        )
+
+        highlighted_node_ids, highlighted_edge_ids = await _load_highlighted_graph_elements(
+            dataset_name=dataset_name,
+            session_id=_build_recall_session_id(dataset_name),
+            query=query,
+        )
+        graph_nodes, graph_edges = await _load_graph_evidence_snapshot(
+            dataset_name=dataset_name,
+            target_node_ids=highlighted_node_ids,
         )
     except MemoryServiceError:
         raise
@@ -296,15 +396,19 @@ async def recall_answer(query: str, dataset_name: str) -> RecallResult:
 
         text = (
             getattr(item, "content", None)
+            or getattr(item, "text_result", None)
             or getattr(item, "text", None)
             or getattr(item, "answer", None)
+            or (item.get("text_result") if isinstance(item, dict) else None)
             or (item.get("content") if isinstance(item, dict) else None)
             or ""
         )
         if text:
-            answers.append(text)
+            if isinstance(text, list):
+                answers.extend(str(entry) for entry in text if entry)
+            else:
+                answers.append(str(text))
 
-        # Collect graph references for visualization (ground rule #7).
         refs = getattr(item, "references", None)
         if refs is None and isinstance(item, dict):
             refs = item.get("references")
@@ -318,6 +422,8 @@ async def recall_answer(query: str, dataset_name: str) -> RecallResult:
         source_label = sources.pop()
     elif sources:
         source_label = "multi"
+    elif answers:
+        source_label = "graph"
     else:
         source_label = "unknown"
 
@@ -325,8 +431,135 @@ async def recall_answer(query: str, dataset_name: str) -> RecallResult:
         answer="\n\n".join(answers),
         source=source_label,
         references=references,
+        graph_nodes=graph_nodes,
+        graph_edges=graph_edges,
+        highlighted_node_ids=highlighted_node_ids,
+        highlighted_edge_ids=highlighted_edge_ids,
         raw=list(results),
     )
+
+
+def _build_recall_session_id(dataset_name: str) -> str:
+    digest = sha1(dataset_name.encode("utf-8")).hexdigest()[:12]
+    return f"recall-{digest}"
+
+
+async def _load_highlighted_graph_elements(
+    dataset_name: str,
+    session_id: str,
+    query: str,
+) -> tuple[list[str], list[str]]:
+    try:
+        from cognee.infrastructure.session.get_session_manager import get_session_manager
+        from cognee.modules.users.methods import get_default_user
+    except Exception as exc:  # pragma: no cover - installed package dependency guard
+        logger.debug("Unable to import Cognee session helpers for recall evidence: %s", exc)
+        return [], []
+
+    session_manager = get_session_manager()
+    if not session_manager.is_available:
+        return [], []
+
+    try:
+        user = await get_default_user()
+        entries = await session_manager.get_session(
+            user_id=str(user.id),
+            session_id=session_id,
+            formatted=False,
+        )
+    except Exception as exc:
+        logger.debug("Unable to read Cognee session metadata for recall evidence: %s", exc)
+        return [], []
+
+    if not isinstance(entries, list) or not entries:
+        return [], []
+
+    for entry in reversed(entries):
+        if getattr(entry, "question", None) != query:
+            continue
+        used = getattr(entry, "used_graph_element_ids", None) or {}
+        node_ids = used.get("node_ids") or []
+        edge_ids = used.get("edge_ids") or []
+        return [str(node_id) for node_id in node_ids], [str(edge_id) for edge_id in edge_ids]
+
+    return [], []
+
+
+async def _load_graph_evidence_snapshot(
+    dataset_name: str,
+    target_node_ids: list[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    try:
+        from cognee.context_global_variables import set_database_global_context_variables
+        from cognee.infrastructure.databases.graph import get_graph_engine
+        from cognee.modules.data.methods import get_authorized_existing_datasets
+        from cognee.modules.users.methods import get_default_user
+    except Exception as exc:  # pragma: no cover - installed package dependency guard
+        logger.debug("Unable to import Cognee graph helpers for recall evidence: %s", exc)
+        return [], []
+
+    try:
+        user = await get_default_user()
+        datasets = await get_authorized_existing_datasets([dataset_name], "read", user)
+        if not datasets:
+            return [], []
+
+        dataset = datasets[0]
+        async with set_database_global_context_variables(dataset.id, dataset.owner_id):
+            graph_engine = await get_graph_engine()
+            get_filtered = getattr(graph_engine, "get_id_filtered_graph_data", None)
+            if target_node_ids and callable(get_filtered):
+                nodes_data, edges_data = await get_filtered(target_ids=target_node_ids)
+                if not nodes_data and not edges_data:
+                    nodes_data, edges_data = await graph_engine.get_graph_data()
+            else:
+                nodes_data, edges_data = await graph_engine.get_graph_data()
+    except Exception as exc:
+        logger.debug("Unable to load Cognee graph evidence snapshot: %s", exc)
+        return [], []
+
+    return _format_graph_nodes(nodes_data), _format_graph_edges(edges_data)
+
+
+def _format_graph_nodes(nodes_data: list[Any]) -> list[dict[str, Any]]:
+    formatted_nodes: list[dict[str, Any]] = []
+    for node_id, properties in nodes_data or []:
+        props = dict(properties or {})
+        label = (
+            props.get("name")
+            or props.get("label")
+            or f"{props.get('type', 'Node')}_{node_id}"
+        )
+        formatted_nodes.append(
+            {
+                "id": str(node_id),
+                "label": str(label),
+                "type": str(props.get("type", "Node")),
+                "properties": {
+                    key: value
+                    for key, value in props.items()
+                    if key not in {"id", "name", "label", "type", "created_at", "updated_at"}
+                    and value is not None
+                },
+            }
+        )
+    return formatted_nodes
+
+
+def _format_graph_edges(edges_data: list[Any]) -> list[dict[str, Any]]:
+    formatted_edges: list[dict[str, Any]] = []
+    for edge in edges_data or []:
+        source_id, target_id, relation, properties = edge
+        props = dict(properties or {})
+        formatted_edges.append(
+            {
+                "id": str(props["edge_object_id"]) if props.get("edge_object_id") is not None else None,
+                "source": str(source_id),
+                "target": str(target_id),
+                "label": str(relation),
+            }
+        )
+    return formatted_edges
 
 
 async def improve_memory(feedback: str, dataset_name: str) -> None:

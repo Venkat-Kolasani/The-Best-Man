@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from uuid import uuid4
 
 from app.models.github import CommitData, PRComment, PRData
@@ -8,6 +9,7 @@ from app.models.ingestion import IngestionSummary
 from app.services import github_service, memory_service
 
 logger = logging.getLogger(__name__)
+_INGEST_BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "20"))
 
 
 def _dataset_name(owner: str, repo: str) -> str:
@@ -78,11 +80,20 @@ def _skip_entry(source_type: str, source_id: str, reason: str) -> dict[str, str]
     }
 
 
+def _batched_entries(
+    entries: list[memory_service.RememberEntry],
+    batch_size: int,
+) -> list[list[memory_service.RememberEntry]]:
+    if batch_size < 1:
+        batch_size = 1
+    return [entries[index : index + batch_size] for index in range(0, len(entries), batch_size)]
+
+
 async def ingest_repo(owner: str, repo: str) -> IngestionSummary:
     dataset_name = _dataset_name(owner, repo)
     logger.warning(
-        "Repo ingestion for %s may re-submit previously seen text; Cognee content hashing should "
-        "dedupe identical entries.",
+        "Repo ingestion for %s may re-submit previously seen text; Cognee content hashing now "
+        "dedupes at the batch-text level. Source-level dedup can be added later if needed.",
         dataset_name,
     )
 
@@ -95,44 +106,76 @@ async def ingest_repo(owner: str, repo: str) -> IngestionSummary:
         comments_ingested=0,
     )
 
+    # Batch entries so bulk repo ingestion triggers far fewer Cognee
+    # add/cognify/improve pipeline runs, which reduces repeated embedding and
+    # graph extraction pressure on Gemini quotas.
+    entries_with_meta: list[tuple[str, str, memory_service.RememberEntry]] = []
+
     for commit in commits:
         source_id = commit.sha
-        try:
-            await memory_service.remember_decision(
-                content=_format_commit_text(owner, repo, commit),
-                dataset_name=dataset_name,
-                source_type="commit",
-                source_id=source_id,
+        entries_with_meta.append(
+            (
+                "commit",
+                source_id,
+                memory_service.RememberEntry(
+                    source_type="commit",
+                    source_id=source_id,
+                    content=_format_commit_text(owner, repo, commit),
+                ),
             )
-            summary.commits_ingested += 1
-        except Exception as exc:
-            summary.skipped.append(_skip_entry("commit", source_id, str(exc)))
+        )
 
     for pr in pull_requests:
         pr_source_id = f"{pr.number}:summary"
-        try:
-            await memory_service.remember_decision(
-                content=_format_pr_text(owner, repo, pr),
-                dataset_name=dataset_name,
-                source_type="pr_comment",
-                source_id=pr_source_id,
+        entries_with_meta.append(
+            (
+                "pr_comment",
+                pr_source_id,
+                memory_service.RememberEntry(
+                    source_type="pr_comment",
+                    source_id=pr_source_id,
+                    content=_format_pr_text(owner, repo, pr),
+                ),
             )
-            summary.prs_ingested += 1
-        except Exception as exc:
-            summary.skipped.append(_skip_entry("pr_comment", pr_source_id, str(exc)))
+        )
 
         for index, comment in enumerate(pr.comments):
             comment_source_id = _build_comment_source_id(pr, comment, index)
-            try:
-                await memory_service.remember_decision(
-                    content=_format_pr_comment_text(owner, repo, pr, comment),
-                    dataset_name=dataset_name,
-                    source_type="pr_comment",
-                    source_id=comment_source_id,
+            entries_with_meta.append(
+                (
+                    "pr_comment",
+                    comment_source_id,
+                    memory_service.RememberEntry(
+                        source_type="pr_comment",
+                        source_id=comment_source_id,
+                        content=_format_pr_comment_text(owner, repo, pr, comment),
+                    ),
                 )
-                summary.comments_ingested += 1
-            except Exception as exc:
-                summary.skipped.append(_skip_entry("pr_comment", comment_source_id, str(exc)))
+            )
+
+    for batch in _batched_entries(
+        [entry for _, _, entry in entries_with_meta],
+        _INGEST_BATCH_SIZE,
+    ):
+        batch_items = entries_with_meta[: len(batch)]
+        entries_with_meta = entries_with_meta[len(batch) :]
+
+        try:
+            await memory_service.remember_decision_batch(
+                entries=batch,
+                dataset_name=dataset_name,
+            )
+            for source_type, _source_id, _entry in batch_items:
+                if source_type == "commit":
+                    summary.commits_ingested += 1
+                elif _source_id.endswith(":summary"):
+                    summary.prs_ingested += 1
+                else:
+                    summary.comments_ingested += 1
+        except Exception as exc:
+            reason = str(exc)
+            for source_type, source_id, _entry in batch_items:
+                summary.skipped.append(_skip_entry(source_type, source_id, reason))
 
     return summary
 
