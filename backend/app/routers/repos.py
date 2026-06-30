@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
@@ -22,6 +24,7 @@ router = APIRouter(prefix="/repos/{owner}/{repo}", tags=["repos"])
 # safe for production multi-worker deployments because each worker would keep
 # its own isolated copy of job state.
 _INGEST_JOBS: dict[str, dict[str, object | None]] = {}
+_INGEST_TIMEOUT_SECONDS = int(os.getenv("INGEST_JOB_TIMEOUT_SECONDS", "900"))
 
 
 async def _run_ingestion_job(job_id: str, owner: str, repo: str) -> None:
@@ -33,7 +36,30 @@ async def _run_ingestion_job(job_id: str, owner: str, repo: str) -> None:
         "repo": repo,
     }
     try:
-        summary = await ingestion_service.ingest_repo(owner, repo)
+        summary = await asyncio.wait_for(
+            ingestion_service.ingest_repo(owner, repo),
+            timeout=_INGEST_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        message = (
+            f"Ingestion timed out after {_INGEST_TIMEOUT_SECONDS} seconds. "
+            "This demo job was marked failed after extended upstream retries or slow processing."
+        )
+        logger.warning(
+            "Repository ingestion timed out for %s/%s (job_id=%s): %s",
+            owner,
+            repo,
+            job_id,
+            message,
+        )
+        _INGEST_JOBS[job_id] = {
+            "status": "failed",
+            "summary": None,
+            "error": message,
+            "owner": owner,
+            "repo": repo,
+        }
+        return
     except Exception as exc:
         logger.exception("Repository ingestion failed for %s/%s (job_id=%s)", owner, repo, job_id)
         _INGEST_JOBS[job_id] = {

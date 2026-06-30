@@ -16,6 +16,10 @@ This design has important limitations:
 - Job state is lost if the server restarts.
 - Job state is not shared across multiple API workers or replicas.
 - It is not suitable for durable background processing in production.
+- Quota-driven upstream retries, such as Gemini embedding `429 RESOURCE_EXHAUSTED` responses,
+  can make Cognee run for a long time. To avoid demo jobs staying `running` indefinitely, the
+  background wrapper applies a timeout and marks the job `failed` if ingestion does not complete
+  within the configured demo window.
 
 Production-ready alternatives include Redis-backed job state, a database job table, or a proper
 task queue such as Celery, RQ, Arq, or a managed workflow system.
