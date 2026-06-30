@@ -53,6 +53,14 @@ async def recall_repo_memory(owner: str, repo: str, request: RecallRequest) -> R
         answer=result.answer,
         traversal=result.references or None,
         sources=result.source,
+        graph={
+            "nodes": result.graph_nodes,
+            "edges": result.graph_edges,
+        },
+        highlighted={
+            "node_ids": result.highlighted_node_ids,
+            "edge_ids": result.highlighted_edge_ids,
+        },
     )
 
 
