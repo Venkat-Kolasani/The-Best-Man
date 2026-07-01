@@ -11,27 +11,42 @@ Every engineering team has faced the same kind of "decision amnesia": a producti
 - Python 3.11+
 - Node.js 20+
 - pip
+- [Ollama](https://ollama.com/)
 
 ### Backend
 
 ```bash
+ollama pull nomic-embed-text
+ollama serve
+
 cd backend
 cp .env.example .env
-# edit .env with your keys (see below)
+# fill in your required variables
 pip install -e .
-uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload
 ```
 
 #### Environment variables
 
-| Variable | Where to get it |
+| Variable | Value / where to get it |
 |---|---|
-| `LLM_API_KEY` | **Free**: [Google AI Studio](https://aistudio.google.com/apikey) (Gemini 3.1 Flash Lite — free tier, no CC needed). **Paid**: [OpenAI](https://platform.openai.com/api-keys) or [Anthropic](https://console.anthropic.com/) |
-| `LLM_PROVIDER` | `"gemini"` (Gemini default), `"openai"`, or `"anthropic"` |
-| `LLM_MODEL` | `"gemini/gemini-3.1-flash-lite"` (default), `"gpt-4o"`, or `"claude-sonnet-4-20250514"` |
+| `LLM_PROVIDER` | `custom` |
+| `LLM_MODEL` | `groq/llama-3.3-70b-versatile` |
+| `LLM_API_KEY` | Create a Groq API key at [console.groq.com/keys](https://console.groq.com/keys) |
+| `EMBEDDING_PROVIDER` | `ollama` |
+| `EMBEDDING_MODEL` | `nomic-embed-text` |
+| `EMBEDDING_ENDPOINT` | `http://localhost:11434/api/embed` |
+| `EMBEDDING_DIMENSIONS` | `768` |
+| `HUGGINGFACE_TOKENIZER` | `nomic-ai/nomic-embed-text-v1.5` |
+| `EMBEDDING_BATCH_SIZE` | `8` |
 | `GITHUB_TOKEN` | [GitHub Tokens](https://github.com/settings/tokens) — needs `repo` or `public_repo` scope |
+| `COGNEE_DB_PATH` | Optional local storage path, default `data/cognee` |
 
 Cognee 1.2+ enables multi-user access control by default. For local dev, add `ENABLE_BACKEND_ACCESS_CONTROL=false` to `.env` to skip authentication.
+
+Current runtime architecture:
+- LLM: Groq via LiteLLM
+- Embeddings: Ollama with `nomic-embed-text`
 
 ### Frontend
 
@@ -45,7 +60,6 @@ npm run dev
 
 ```bash
 cd backend
-pip install -e ".[dev]"
 pytest
 ```
 

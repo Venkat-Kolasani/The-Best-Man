@@ -1,5 +1,8 @@
 # Build Log
 
+Note: entries below are historical. The current project setup now uses Groq via LiteLLM for the
+LLM layer and Ollama with `nomic-embed-text` for embeddings.
+
 ## 2026-06-29 — Initial Scaffold
 
 ### What we did
