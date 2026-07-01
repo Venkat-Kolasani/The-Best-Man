@@ -293,9 +293,7 @@ def test_parse_commit_minimal_fields():
 
 
 def test_parse_commit_nested_none():
-    result = github_service._parse_commit(
-        {"sha": "abc", "commit": None, "files": None}
-    )
+    result = github_service._parse_commit({"sha": "abc", "commit": None, "files": None})
     assert result.sha == "abc"
     assert result.message == ""
     assert result.author is None

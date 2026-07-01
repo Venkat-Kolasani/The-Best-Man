@@ -3,13 +3,14 @@ from __future__ import annotations
 import pytest
 
 from app.models.github import CommitData, PRComment, PRData
-from app.models.ingestion import IngestionSummary
 from app.services import ingestion_service
 from app.services.memory_service import RememberEntry
 
 
 def _fake_commit(sha: str, message: str = "fix", files: list[str] | None = None) -> CommitData:
-    return CommitData(sha=sha, message=message, author="dev1", date="2025-01-01", files_changed=files or [])
+    return CommitData(
+        sha=sha, message=message, author="dev1", date="2025-01-01", files_changed=files or []
+    )
 
 
 def _fake_pr(number: int, comments: list[PRComment] | None = None) -> PRData:
@@ -53,7 +54,9 @@ async def test_ingest_repo_counts_and_batches(monkeypatch: pytest.MonkeyPatch):
     async def _fake_remember_batch(*, entries, dataset_name):
         call_args.append((entries, dataset_name))
 
-    monkeypatch.setattr(ingestion_service.memory_service, "remember_decision_batch", _fake_remember_batch)
+    monkeypatch.setattr(
+        ingestion_service.memory_service, "remember_decision_batch", _fake_remember_batch
+    )
     monkeypatch.setattr(ingestion_service, "_INGEST_BATCH_SIZE", 100)
 
     summary = await ingestion_service.ingest_repo("acme", "widgets")
@@ -95,7 +98,9 @@ async def test_ingest_repo_multiple_batches(monkeypatch: pytest.MonkeyPatch):
     async def _fake_remember_batch(*, entries, dataset_name):
         call_args.append((entries, dataset_name))
 
-    monkeypatch.setattr(ingestion_service.memory_service, "remember_decision_batch", _fake_remember_batch)
+    monkeypatch.setattr(
+        ingestion_service.memory_service, "remember_decision_batch", _fake_remember_batch
+    )
     monkeypatch.setattr(ingestion_service, "_INGEST_BATCH_SIZE", 2)
 
     summary = await ingestion_service.ingest_repo("acme", "widgets")
@@ -139,7 +144,9 @@ async def test_ingest_repo_batch_failure_skips_and_continues(monkeypatch: pytest
         if call_count == 2:
             raise RuntimeError("LLM quota exceeded")
 
-    monkeypatch.setattr(ingestion_service.memory_service, "remember_decision_batch", _fake_remember_batch)
+    monkeypatch.setattr(
+        ingestion_service.memory_service, "remember_decision_batch", _fake_remember_batch
+    )
     monkeypatch.setattr(ingestion_service, "_INGEST_BATCH_SIZE", 2)
 
     summary = await ingestion_service.ingest_repo("acme", "widgets")
@@ -172,7 +179,11 @@ async def test_ingest_repo_empty(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(ingestion_service.github_service, "fetch_commits", fake_fetch)
     monkeypatch.setattr(ingestion_service.github_service, "fetch_pull_requests", fake_fetch)
-    monkeypatch.setattr(ingestion_service.memory_service, "remember_decision_batch", lambda *, entries, dataset_name: None)
+    monkeypatch.setattr(
+        ingestion_service.memory_service,
+        "remember_decision_batch",
+        lambda *, entries, dataset_name: None,
+    )
     monkeypatch.setattr(ingestion_service, "_INGEST_BATCH_SIZE", 20)
 
     summary = await ingestion_service.ingest_repo("acme", "empty-repo")
@@ -191,7 +202,9 @@ async def test_add_manual_decision(monkeypatch: pytest.MonkeyPatch):
     call_kwargs: dict = {}
 
     async def _fake_remember(content, dataset_name, source_type, source_id):
-        call_kwargs.update(content=content, dataset_name=dataset_name, source_type=source_type, source_id=source_id)
+        call_kwargs.update(
+            content=content, dataset_name=dataset_name, source_type=source_type, source_id=source_id
+        )
 
     monkeypatch.setattr(ingestion_service.memory_service, "remember_decision", _fake_remember)
 
@@ -252,7 +265,9 @@ def test_format_pr_text():
 
 
 def test_format_pr_text_merged():
-    pr = PRData(number=5, title="Merged PR", body="body", state="closed", merged_at="2025-02-01T00:00:00Z")
+    pr = PRData(
+        number=5, title="Merged PR", body="body", state="closed", merged_at="2025-02-01T00:00:00Z"
+    )
     text = ingestion_service._format_pr_text("acme", "widgets", pr)
     assert "merged on 2025-02-01" in text
 

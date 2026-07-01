@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Callable
+from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from app.models.api import (
     ErrorResponse,
@@ -14,8 +16,7 @@ from app.models.api import (
     ManualDecisionRequest,
     ManualDecisionResponse,
 )
-from app.services import ingestion_service
-from app.services import memory_service
+from app.models.ingestion import IngestionSummary
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,27 @@ _INGEST_TIMEOUT_SECONDS = int(os.getenv("INGEST_JOB_TIMEOUT_SECONDS", "900"))
 _MANUAL_DECISION_TIMEOUT_SECONDS = int(os.getenv("MANUAL_DECISION_TIMEOUT_SECONDS", "120"))
 
 
-async def _run_ingestion_job(job_id: str, owner: str, repo: str) -> None:
+# ── Dependency injection helpers ─────────────────────────────────────────────
+
+
+def get_ingestion_service() -> Any:
+    from app.services import ingestion_service as svc
+
+    return svc
+
+
+def get_memory_service() -> Any:
+    from app.services import memory_service as svc
+
+    return svc
+
+
+async def _run_ingestion_job(
+    job_id: str,
+    owner: str,
+    repo: str,
+    ingest_repo_fn: Callable[[str, str], Any],
+) -> None:
     _INGEST_JOBS[job_id] = {
         "status": "running",
         "summary": None,
@@ -38,8 +59,8 @@ async def _run_ingestion_job(job_id: str, owner: str, repo: str) -> None:
         "repo": repo,
     }
     try:
-        summary = await asyncio.wait_for(
-            ingestion_service.ingest_repo(owner, repo),
+        summary: IngestionSummary = await asyncio.wait_for(
+            ingest_repo_fn(owner, repo),
             timeout=_INGEST_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
@@ -102,6 +123,7 @@ async def start_ingestion(
     owner: str,
     repo: str,
     background_tasks: BackgroundTasks,
+    ingestion_service: Any = Depends(get_ingestion_service),
 ) -> IngestJobResponse:
     job_id = str(uuid4())
     _INGEST_JOBS[job_id] = {
@@ -112,7 +134,9 @@ async def start_ingestion(
         "repo": repo,
     }
     # Create an asyncio.Task for the ingestion so it can be cancelled later.
-    task = asyncio.create_task(_run_ingestion_job(job_id, owner, repo))
+    task = asyncio.create_task(
+        _run_ingestion_job(job_id, owner, repo, ingestion_service.ingest_repo)
+    )
     _INGEST_JOBS[job_id]["task"] = task
     return IngestJobResponse(job_id=job_id, status="queued")
 
@@ -181,6 +205,8 @@ async def add_manual_decision(
     owner: str,
     repo: str,
     request: ManualDecisionRequest,
+    ingestion_service: Any = Depends(get_ingestion_service),
+    memory_service: Any = Depends(get_memory_service),
 ) -> ManualDecisionResponse:
     try:
         await asyncio.wait_for(

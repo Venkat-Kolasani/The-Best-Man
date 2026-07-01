@@ -190,9 +190,7 @@ async def test_recall_answer_empty_on_missing_dataset(monkeypatch: pytest.Monkey
         MagicMock(GRAPH_COMPLETION="graph_completion"),
     )
 
-    result = await memory_service.recall_answer(
-        query="Why?", dataset_name="repo:missing/repo"
-    )
+    result = await memory_service.recall_answer(query="Why?", dataset_name="repo:missing/repo")
 
     assert result.answer == ""
     assert result.source == "empty"

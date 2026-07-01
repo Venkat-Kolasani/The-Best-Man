@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.models.api import (
     ErrorResponse,
@@ -10,17 +12,30 @@ from app.models.api import (
     RecallRequest,
     RecallResponse,
 )
-from app.services import memory_service
 
 router = APIRouter(prefix="/repos/{owner}/{repo}", tags=["memory"])
+
+
+# ── Dependency injection helper ──────────────────────────────────────────────
+
+
+def get_memory_service() -> Any:
+    from app.services import memory_service as svc
+
+    return svc
+
+
+# ── Internal helpers ─────────────────────────────────────────────────────────
 
 
 def _dataset_name(owner: str, repo: str) -> str:
     return f"repo:{owner}/{repo}"
 
 
-def _raise_memory_http_error(action: str, exc: memory_service.MemoryServiceError) -> None:
-    if isinstance(exc, memory_service.MemoryBusyError):
+def _raise_memory_http_error(action: str, memory_service: Any, exc: Any) -> None:
+    from app.services.memory_service import MemoryBusyError
+
+    if isinstance(exc, MemoryBusyError):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -40,14 +55,19 @@ def _raise_memory_http_error(action: str, exc: memory_service.MemoryServiceError
     response_model=RecallResponse,
     responses={409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
 )
-async def recall_repo_memory(owner: str, repo: str, request: RecallRequest) -> RecallResponse:
+async def recall_repo_memory(
+    owner: str,
+    repo: str,
+    request: RecallRequest,
+    memory_service: Any = Depends(get_memory_service),
+) -> RecallResponse:
     try:
         result = await memory_service.recall_answer(
             query=request.query,
             dataset_name=_dataset_name(owner, repo),
         )
     except memory_service.MemoryServiceError as exc:
-        _raise_memory_http_error("recall from memory", exc)
+        _raise_memory_http_error("recall from memory", memory_service, exc)
 
     return RecallResponse(
         answer=result.answer,
@@ -69,14 +89,19 @@ async def recall_repo_memory(owner: str, repo: str, request: RecallRequest) -> R
     response_model=ImproveResponse,
     responses={409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
 )
-async def improve_repo_memory(owner: str, repo: str, request: ImproveRequest) -> ImproveResponse:
+async def improve_repo_memory(
+    owner: str,
+    repo: str,
+    request: ImproveRequest,
+    memory_service: Any = Depends(get_memory_service),
+) -> ImproveResponse:
     try:
         await memory_service.improve_memory(
             feedback=request.feedback,
             dataset_name=_dataset_name(owner, repo),
         )
     except memory_service.MemoryServiceError as exc:
-        _raise_memory_http_error("improve memory", exc)
+        _raise_memory_http_error("improve memory", memory_service, exc)
 
     return ImproveResponse(status="ok")
 
@@ -86,10 +111,14 @@ async def improve_repo_memory(owner: str, repo: str, request: ImproveRequest) ->
     response_model=ForgetResponse,
     responses={409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
 )
-async def forget_repo_memory(owner: str, repo: str) -> ForgetResponse:
+async def forget_repo_memory(
+    owner: str,
+    repo: str,
+    memory_service: Any = Depends(get_memory_service),
+) -> ForgetResponse:
     try:
         await memory_service.forget_dataset(dataset_name=_dataset_name(owner, repo))
     except memory_service.MemoryServiceError as exc:
-        _raise_memory_http_error("forget repo memory", exc)
+        _raise_memory_http_error("forget repo memory", memory_service, exc)
 
     return ForgetResponse(status="ok")
