@@ -29,3 +29,7 @@ quote-style = "double"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "live_cognee: tests calling real Cognee APIs (costs LLM/embedding credits); use `pytest -m live_cognee` to run",
+]
+addopts = "-m 'not live_cognee'"

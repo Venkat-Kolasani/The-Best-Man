@@ -49,6 +49,17 @@ pip install -e ".[dev]"
 pytest
 ```
 
+Tests marked ``@pytest.mark.live_cognee`` exercise real Cognee API calls
+(remember, recall, forget) against a disposable dataset and will consume
+LLM / embedding credits. They are **skipped by default**. To run them:
+
+```bash
+pytest -m live_cognee
+```
+
+You must have a valid ``LLM_API_KEY`` and working LLM/embedding provider
+configured in your ``.env`` for these integration tests to pass.
+
 ## Project Structure
 
 ```
