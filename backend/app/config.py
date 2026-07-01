@@ -4,6 +4,9 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+
 class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_provider: str = "gemini"
@@ -15,7 +18,7 @@ class Settings(BaseSettings):
     cognee_db_path: str = "data/cognee"
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_BACKEND_DIR / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -24,7 +27,6 @@ class Settings(BaseSettings):
 settings = Settings()
 
 _cognee_initialized = False
-_BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 
 def initialize_cognee() -> None:
@@ -32,9 +34,13 @@ def initialize_cognee() -> None:
     global _cognee_initialized
 
     import cognee
+    import litellm
 
     if _cognee_initialized:
         return
+
+    # Allow litellm to drop unsupported parameters per provider (e.g., HuggingFace doesn't support dimensions)
+    litellm.drop_params = True
 
     cognee_root = (_BACKEND_DIR / settings.cognee_db_path).resolve()
     cognee.config.system_root_directory(str(cognee_root))

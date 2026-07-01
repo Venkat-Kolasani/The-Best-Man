@@ -5,7 +5,6 @@ import time
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 from app.routers.memory import router as memory_router
 from app.routers.repos import router as repos_router
@@ -16,7 +15,7 @@ app = FastAPI(title="The Best Man", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,9 +36,7 @@ def _flatten_included_routers() -> None:
     """
 
     concrete_routes = [
-        route
-        for route in app.router.routes
-        if route.__class__.__name__ != "_IncludedRouter"
+        route for route in app.router.routes if route.__class__.__name__ != "_IncludedRouter"
     ]
     concrete_routes.extend(repos_router.routes)
     concrete_routes.extend(memory_router.routes)

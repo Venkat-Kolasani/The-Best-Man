@@ -40,13 +40,9 @@ def _format_pr_text(owner: str, repo: str, pr: PRData) -> str:
     title = _normalize_text(pr.title, "Untitled pull request")
     body = _normalize_text(pr.body, "No pull request description was provided.")
     state = _normalize_text(pr.state, "unknown")
-    outcome = (
-        f"It was merged on {pr.merged_at}."
-        if pr.merged_at
-        else "It has not been merged."
-    )
+    outcome = f"It was merged on {pr.merged_at}." if pr.merged_at else "It has not been merged."
     return (
-        f"In {owner}/{repo}, PR #{pr.number}, \"{title}\", proposed the following change: {body} "
+        f'In {owner}/{repo}, PR #{pr.number}, "{title}", proposed the following change: {body} '
         f"The pull request is currently {state}. {outcome}"
     )
 
@@ -63,7 +59,7 @@ def _format_pr_comment_text(owner: str, repo: str, pr: PRData, comment: PRCommen
     body = _normalize_text(comment.body, "No comment body was provided.")
     title = _normalize_text(pr.title, "Untitled pull request")
     return (
-        f"In the discussion for {owner}/{repo} PR #{pr.number}, \"{title}\", {author} noted on "
+        f'In the discussion for {owner}/{repo} PR #{pr.number}, "{title}", {author} noted on '
         f"{created_at}: {body}"
     )
 

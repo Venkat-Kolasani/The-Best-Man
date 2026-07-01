@@ -525,11 +525,7 @@ def _format_graph_nodes(nodes_data: list[Any]) -> list[dict[str, Any]]:
     formatted_nodes: list[dict[str, Any]] = []
     for node_id, properties in nodes_data or []:
         props = dict(properties or {})
-        label = (
-            props.get("name")
-            or props.get("label")
-            or f"{props.get('type', 'Node')}_{node_id}"
-        )
+        label = props.get("name") or props.get("label") or f"{props.get('type', 'Node')}_{node_id}"
         formatted_nodes.append(
             {
                 "id": str(node_id),
@@ -553,7 +549,9 @@ def _format_graph_edges(edges_data: list[Any]) -> list[dict[str, Any]]:
         props = dict(properties or {})
         formatted_edges.append(
             {
-                "id": str(props["edge_object_id"]) if props.get("edge_object_id") is not None else None,
+                "id": str(props["edge_object_id"])
+                if props.get("edge_object_id") is not None
+                else None,
                 "source": str(source_id),
                 "target": str(target_id),
                 "label": str(relation),

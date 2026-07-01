@@ -30,6 +30,7 @@ def ensure_compatible_runtime() -> None:
     """Re-exec into a Python runtime that has Cognee and its compiled deps."""
     try:
         import cognee  # noqa: F401
+
         return
     except ImportError:
         pass
@@ -39,7 +40,10 @@ def ensure_compatible_runtime() -> None:
 
     for candidate in ("/opt/anaconda3/bin/python", "/opt/anaconda3/bin/python3"):
         candidate_path = Path(candidate)
-        if not candidate_path.exists() or Path(sys.executable).resolve() == candidate_path.resolve():
+        if (
+            not candidate_path.exists()
+            or Path(sys.executable).resolve() == candidate_path.resolve()
+        ):
             continue
 
         os.environ["TBM_SMOKE_REEXEC"] = "1"
@@ -74,7 +78,7 @@ ensure_compatible_runtime()
 load_backend_env()
 sys.path.insert(0, str(BACKEND_DIR))
 
-from app.services.memory_service import (
+from app.services.memory_service import (  # noqa: E402
     MemoryServiceError,
     remember_decision,
     recall_answer,
@@ -150,9 +154,7 @@ async def main() -> None:
     # Phase 2: Recall — ask a question that needs at least two facts.
     # -----------------------------------------------------------------------
     print("\n--- Phase 2: recall_answer ---\n")
-    query = (
-        "Why did the team choose Postgres, and who required ACID compliance?"
-    )
+    query = "Why did the team choose Postgres, and who required ACID compliance?"
     print(f"  Query: {query}\n")
 
     t0 = time.perf_counter()
@@ -166,7 +168,7 @@ async def main() -> None:
     print(f"  Elapsed : {elapsed:.1f}s")
     print(f"  Source  : {result.source}")
     print(f"  Refs    : {len(result.references)} reference(s)")
-    print(f"  Answer  :")
+    print("  Answer  :")
     for line in result.answer.splitlines():
         print(f"           {line}")
     print()
@@ -201,7 +203,7 @@ async def main() -> None:
     print(f"  Elapsed : {elapsed:.1f}s")
     print(f"  Source  : {after_result.source}")
     print(f"  Refs    : {len(after_result.references)} reference(s)")
-    print(f"  Answer  :")
+    print("  Answer  :")
     for line in after_result.answer.splitlines():
         print(f"           {line}")
     print()

@@ -62,6 +62,16 @@ async def _run_ingestion_job(job_id: str, owner: str, repo: str) -> None:
             "repo": repo,
         }
         return
+    except asyncio.CancelledError:
+        logger.info("Repository ingestion cancelled for %s/%s (job_id=%s)", owner, repo, job_id)
+        _INGEST_JOBS[job_id] = {
+            "status": "cancelled",
+            "summary": None,
+            "error": "ingestion cancelled",
+            "owner": owner,
+            "repo": repo,
+        }
+        return
     except Exception as exc:
         logger.exception("Repository ingestion failed for %s/%s (job_id=%s)", owner, repo, job_id)
         _INGEST_JOBS[job_id] = {
@@ -101,8 +111,37 @@ async def start_ingestion(
         "owner": owner,
         "repo": repo,
     }
-    background_tasks.add_task(_run_ingestion_job, job_id, owner, repo)
+    # Create an asyncio.Task for the ingestion so it can be cancelled later.
+    task = asyncio.create_task(_run_ingestion_job(job_id, owner, repo))
+    _INGEST_JOBS[job_id]["task"] = task
     return IngestJobResponse(job_id=job_id, status="queued")
+
+
+@router.post(
+    "/ingest/{job_id}/cancel",
+    response_model=IngestJobStatusResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+async def cancel_ingestion(owner: str, repo: str, job_id: str) -> IngestJobStatusResponse:
+    job = _INGEST_JOBS.get(job_id)
+    if job is None or job.get("owner") != owner or job.get("repo") != repo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Ingestion job '{job_id}' was not found for {owner}/{repo}.",
+        )
+
+    task = job.get("task")
+    if task is None:
+        # nothing to cancel; return current status
+        status_str = str(job.get("status", "unknown"))
+        return IngestJobStatusResponse(job_id=job_id, status=status_str, summary=job.get("summary"))
+
+    if not task.done():
+        task.cancel()
+        # optimistic update; _run_ingestion_job will also set cancelled status when it observes CancelledError
+        job["status"] = "cancelling"
+
+    return IngestJobStatusResponse(job_id=job_id, status=str(job.get("status")), summary=job.get("summary"))
 
 
 @router.get(

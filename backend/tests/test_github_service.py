@@ -169,7 +169,9 @@ async def test_fetch_commits_respects_limit_across_pages(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
-async def test_rate_limit_warning_is_logged(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture):
+async def test_rate_limit_warning_is_logged(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,

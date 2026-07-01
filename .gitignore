@@ -22,3 +22,6 @@ data/cognee/
 .DS_Store
 Thumbs.db
 backend/data/
+
+# Logs
+*.log
