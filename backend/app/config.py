@@ -52,4 +52,10 @@ def initialize_cognee() -> None:
     cognee.config.set_embedding_model(settings.embedding_model)
     cognee.config.set_embedding_dimensions(settings.embedding_dimensions)
     cognee.config.set_embedding_api_key(settings.llm_api_key)
+    # Run both graph (Kuzu) and vector (LanceDB) databases in-process —
+    # the subprocess proxy requires ``cognee-db-workers``, but its subprocess
+    # init fails on macOS with Cognee 1.2.2 (worker crashes before signalling
+    # ready).  In-process mode avoids the subprocess entirely.
+    cognee.config.set_graph_database_subprocess_enabled(False)
+    cognee.config.set_vector_db_subprocess_enabled(False)
     _cognee_initialized = True

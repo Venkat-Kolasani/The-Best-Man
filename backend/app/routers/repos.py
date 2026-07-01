@@ -141,7 +141,9 @@ async def cancel_ingestion(owner: str, repo: str, job_id: str) -> IngestJobStatu
         # optimistic update; _run_ingestion_job will also set cancelled status when it observes CancelledError
         job["status"] = "cancelling"
 
-    return IngestJobStatusResponse(job_id=job_id, status=str(job.get("status")), summary=job.get("summary"))
+    return IngestJobStatusResponse(
+        job_id=job_id, status=str(job.get("status")), summary=job.get("summary")
+    )
 
 
 @router.get(
